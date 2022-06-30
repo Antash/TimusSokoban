@@ -1,6 +1,7 @@
 ﻿//#define BYTE_ARRAY
 //#define PRIORITY_QUEUE
 //#define SIMULATE
+#define ONLINE_JUDGE
 
 using System;
 using System.Collections.Generic;
@@ -10,6 +11,163 @@ using System.Text;
 
 namespace Timus
 {
+    public class BoardSettings
+    {
+        private readonly char[] _charMap = "# .$@*+".ToCharArray();
+        public BoardSettings() { }
+        public BoardSettings(char wall, char space, char target)
+        {
+            _charMap[0] = wall;
+            _charMap[1] = space;
+            _charMap[2] = target;
+        }
+        public char Wall { get => _charMap[0]; }
+        public char Space { get => _charMap[1]; }
+        public char FreeTarget { get => _charMap[2]; }
+        public char Box { get => _charMap[3]; }
+        public char Player { get => _charMap[4]; }
+        public char TargetWithBox { get => _charMap[5]; }
+        public char TargetWithPlayer { get => _charMap[6]; }
+    }
+    public interface IOHelper
+    {
+        BoardState ReadBoard(BoardSettings settings);
+        BoardState ReadMove(BoardState board, BoardSettings settings);
+        void PrintBoard(BoardState board, BoardSettings settings);
+        void PrintSolution(string moveSequence);
+    }
+    public class CodingameIO : IOHelper
+    {
+        public BoardState ReadBoard(BoardSettings settings)
+        {
+            string[] inputs;
+            inputs = Console.ReadLine().Split(' ');
+            int width = int.Parse(inputs[0]);
+            Console.Error.WriteLine(width);
+            int height = int.Parse(inputs[1]);
+            Console.Error.WriteLine(height);
+            int boxCount = int.Parse(inputs[2]);
+            var lines = new List<string>();
+            for (int i = 0; i < height; i++)
+            {
+                string line = Console.ReadLine();
+                Console.Error.WriteLine(line);
+                lines.Add(line);
+            }
+
+            BoardState board = ReadBoard(lines.ToArray(), settings);
+            BoardState.BoxCount = boxCount;
+            return board;
+        }
+
+        public BoardState ReadMove(BoardState board, BoardSettings settings)
+        {
+            var inputs = Console.ReadLine().Split(' ');
+            int pusherX = int.Parse(inputs[0]);
+            int pusherY = int.Parse(inputs[1]);
+            var boxes = new List<(int, int)>();
+            for (int i = 0; i < BoardState.BoxCount; i++)
+            {
+                inputs = Console.ReadLine().Split(' ');
+                int boxX = int.Parse(inputs[0]);
+                int boxY = int.Parse(inputs[1]);
+                boxes.Add((boxX, boxY));
+            }
+
+            board = FillBoard(board, pusherX, pusherY, boxes);
+            return board;
+        }
+
+        private static BoardState FillBoard(BoardState board, int px, int py, List<(int, int)> boxes)
+        {
+            short player = (short)(BoardState.Width * py + px);
+            foreach (var b in boxes)
+            {
+                short index = (short)(BoardState.Width * b.Item2 + b.Item1);
+                board[index] |= Cell.Box;
+            }
+
+            board.ReprocessAccessible(player);
+            board.LastMove = new Move(player, Direction.D);
+            return board;
+        }
+
+        private BoardState ReadBoard(string[] lines, BoardSettings settings)
+        {
+            BoardState.Width = lines.Max(l => l.Length);
+            BoardState.Height = lines.Length;
+            BoardState.Len = BoardState.Width * BoardState.Height;
+            var board = new BoardState(BoardState.Len);
+
+            short player = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                for (int j = 0; j < lines[i].Length; j++)
+                {
+                    short index = (short)(BoardState.Width * i + j);
+                    if (lines[i][j] == settings.TargetWithPlayer || lines[i][j] == settings.Player)
+                    {
+                        player = index;
+                    }
+
+                    board[index] = lines[i][j] == settings.TargetWithBox || lines[i][j] == settings.Box
+                        ? Cell.Box
+                        : lines[i][j] == settings.Wall ? Cell.Wall : Cell.Space;
+
+                    if (lines[i][j] == settings.FreeTarget || lines[i][j] == settings.TargetWithBox || lines[i][j] == settings.TargetWithPlayer)
+                    {
+                        board[index] |= Cell.Target;
+                        BoardState.Targets.Add(index);
+                    }
+                }
+            }
+
+            if (player >= 0)
+            {
+                board.ReprocessAccessible(player);
+                // Dummy move to record start player position.
+                board.LastMove = new Move(player, Direction.D);
+            }
+
+            return board;
+        }
+
+        public void PrintBoard(BoardState board, BoardSettings settings)
+        {
+            for (int i = 0; i < BoardState.Len; i++)
+            {
+                if (i / BoardState.Width > 0 && i % BoardState.Width == 0)
+                {
+                    Console.Error.Write(Environment.NewLine);
+                }
+
+                switch (board[i] & ~Cell.Target)
+                {
+                    case Cell.Wall:
+                        Console.Error.Write(settings.Wall);
+                        break;
+                    case Cell.Accessible:
+                    case Cell.Space:
+                        bool playerHere = board.LastMove.BoxId == i;
+                        Console.Error.Write((board[i] & Cell.Target) != 0
+                            ? playerHere ? settings.TargetWithPlayer : settings.FreeTarget
+                            : playerHere ? settings.Player : settings.Space);
+                        break;
+                    case Cell.Box:
+                        Console.Error.Write((board[i] & Cell.Target) != 0 ? settings.TargetWithBox : settings.Box);
+                        break;
+                    default:
+                        Console.Error.WriteLine(board[i]);
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+        }
+
+        public void PrintSolution(string moveSequence)
+        {
+            throw new NotImplementedException();
+        }
+    }
     public class PriorityQueue<T> where T : IComparable<T>
     {
         private List<T> list;
@@ -133,22 +291,6 @@ namespace Timus
         }
     }
 
-    public struct Canyon
-    {
-        public Canyon(short targets, short[] positions)
-        {
-            Targets = targets;
-            Positions = positions;
-            BoxCount = 0;
-        }
-
-        short Targets { get; }
-
-        short[] Positions { get; }
-
-        short BoxCount { get; set; }
-    }
-
     [DebuggerDisplay("{DebuggerDisplay}")]
     public struct BoardState : IEquatable<BoardState>, IComparable<BoardState>
     {
@@ -160,8 +302,8 @@ namespace Timus
         public static int Width;
         public static int Height;
         public static int Len;
+        public static int BoxCount;
         public static List<short> Targets = new List<short>();
-        public static List<Canyon> Canyons = new List<Canyon>();
 
         private static int ElementCount
         {
@@ -217,11 +359,6 @@ namespace Timus
             LastMove = default(Move);
         }
 
-        public static void DetectCanyons(BoardState board)
-        {
-
-        }
-
         public Cell this[int index]
         {
             get
@@ -268,6 +405,8 @@ namespace Timus
 
         public void ReprocessAccessible(int player)
         {
+            if (player < 0) return;
+
             this[player] ^= Cell.Accessible;
 
             if (this[player + 1] == Cell.Space || this[player + 1] == Cell.Target)
@@ -629,214 +768,10 @@ namespace Timus
 
     public class Sokoban
     {
-        private static BoardState ReadBoard(string[] lines)
-        {
-            BoardState.Width = lines.Max(l => l.Length);
-            BoardState.Height = lines.Length;
-            BoardState.Len = BoardState.Width * BoardState.Height;
-            var board = new BoardState(BoardState.Len);
-
-            short player = -1;
-            for (int i = 0; i < lines.Length; i++)
-            {
-                for (int j = 0; j < lines[i].Length; j++)
-                {
-                    short index = (short)(BoardState.Width * i + j);
-                    if (lines[i][j] == '+' || lines[i][j] == '@')
-                    {
-                        player = index;
-                    }
-
-                    board[index] = lines[i][j] == '*' || lines[i][j] == '$'
-                        ? Cell.Box
-                        : lines[i][j] == '#' ? Cell.Wall : Cell.Space;
-
-                    if (lines[i][j] == '+' || lines[i][j] == '.' || lines[i][j] == '*')
-                    {
-                        board[index] |= Cell.Target;
-                        BoardState.Targets.Add(index);
-                    }
-                }
-            }
-
-            BoardState.DetectCanyons(board);
-
-            board.ReprocessAccessible(player);
-            // Dummy move to record start player position.
-            board.LastMove = new Move(player, Direction.D);
-            return board;
-        }
-
         private static void Main()
         {
-            var test1 = new[]
-            {
-                "########",
-                "#@  $ .#",
-                "########"
-            };
-
-            var test2 = new[]
-            {
-                " ######",
-                "##   .#",
-                "#@  ###",
-                "#   * #",
-                "#   $ #",
-                "#     #",
-                "#######",
-            };
-
-            var test3 = new[]
-            {
-                "#########",
-                "###  #  ###",
-                "###.$.$. @#",
-                "#  . #$.$ #",
-                "# #$ .$. ##",
-                "#  . $$ ###",
-                "###  #  ###",
-                "###########"
-            };
-
-            var test4 = new[]
-            {
-                " ######",
-                "##   .#",
-                "#@    #",
-                "###$###",
-                "#     #",
-                "#     #",
-                "#     #",
-                "#######",
-            };
-
-            var test5 = new[]
-            {
-                " ######",
-                "##   .#",
-                "#@  ###",
-                "#   * #",
-                "#   $ #",
-                "#.$   #",
-                "#######",
-            };
-
-            var test6 = new[]
-            {
-                " ##################",
-                "##           .   .#",
-                "#@                #",
-                "#    $      $     #",
-                "#                 #",
-                "###*###*###*###*###",
-                "#            $    #",
-                "#    $           .#",
-                "#        .        #",
-                "###################",
-            };
-
-            var test7 = new[]
-            {
-                " ######",
-                "##   *#",
-                "#@  ###",
-                "#   * #",
-                "#   * #",
-                "#*    #",
-                "#######",
-            };
-
-            var test8 = new[]
-            {
-                "########",
-                "#......#",
-                "#.   $ #",
-                "#.@$  $#",
-                "#$ $ $ #",
-                "# $$ $ #",
-                "#.$   .#",
-                "########"
-            };
-
-            var test9 = new[]
-            {
-                "########",
-                "#......#",
-                "#      #",
-                "#***** #",
-                "#      #",
-                "#***** #",
-                "#      #",
-                "#***** #",
-                "#      #",
-                "#$$$$$$#",
-                "#     @#",
-                "########"
-            };
-
-            var test10 = new[]
-            {
-                "########",
-                "#. $  .#",
-                "# $..$ #",
-                "#$$..$ #",
-                "# $..$$#",
-                "#@$ .$ #",
-                "#..$  .#",
-                "########"
-            };
-
-            var test11 = new[]
-            {
-                "########",
-                "#......#",
-                "###*** #",
-                "#@ $ $ #",
-                "#  $ $ #",
-                "#$ $ $ #",
-                "#.     #",
-                "########"
-            };
-
-            var test12 = new[]
-            {
-                "########",
-                "#.   . #",
-                "#@$ ## #",
-                "#   *  #",
-                "#.$ $ $#",
-                "#$$$$..#",
-                "#...   #",
-                "########"
-            };
-
-            var test13 = new[]
-            {
-                "########",
-                "#.     #",
-                "#$ $ $ #",
-                "#  $ $ #",
-                "#@ $ $ #",
-                "###*** #",
-                "#......#",
-                "########"
-            };
-
-            var test14 = new[]
-            {
-                " #####  ",
-                " # @ ###",
-                "## #$  #",
-                "# *. . #",
-                "#  $$ ##",
-                "### #.# ",
-                "  #   # ",
-                "  ##### "
-            };
-
 #if ONLINE_JUDGE
-            var input = Console.In.ReadToEnd().Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+            //var input = Console.In.ReadToEnd().Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
 #else
             var solveTimer = new Stopwatch();
             solveTimer.Start();
@@ -844,48 +779,61 @@ namespace Timus
             var input = test14.ToList();
 #endif
 
-            var board = ReadBoard(input.ToArray());
+            //var board = ReadBoard(input.ToArray());
+            var settings = new BoardSettings('#', '.', '*');
+            var defaultSettings = new BoardSettings();
+            var io = new CodingameIO();
+            var board = io.ReadBoard(settings);
+            string moveChain = String.Empty;
+            int moveCount = 0;
+            // game loop
+            while (true)
+            {
+                board = io.ReadMove(board, settings);
+                if (moveCount == 0)
+                {
+                    io.PrintBoard(board, defaultSettings);
 #if !SIMULATE
-            var positions = new HashSet<BoardState>();
-            bool solutionFound = false;
+                    var positions = new HashSet<BoardState>();
+                    bool solutionFound = false;
 #if PRIORITY_QUEUE
             var solutionQueue = new PriorityQueue<BoardState>();
 #else
-            var solutionQueue = new Queue<BoardState>();
+                    var solutionQueue = new Queue<BoardState>();
 #endif
-            solutionQueue.Enqueue(board);
+                    solutionQueue.Enqueue(board);
 
-            BoardState winBoard = board;
+                    BoardState winBoard = board;
 
-            void Process(BoardState b)
-            {
-                if (b.IsWinning())
-                {
-                    solutionFound = true;
-                    winBoard = b;
-                    return;
-                }
-                if (positions.Add(b))
-                {
-                    foreach (var move in b.FindMoves())
+                    void Process(BoardState b)
                     {
-                        var newB = b.MakeMove(move);
-                        if (newB.IsStatePlayable())
+                        if (b.IsWinning())
                         {
-                            newB.Generation++;
-                            newB.CalculateWeight();
-                            solutionQueue.Enqueue(newB);
+                            solutionFound = true;
+                            winBoard = b;
+                            return;
+                        }
+                        if (positions.Add(b))
+                        {
+                            foreach (var move in b.FindMoves())
+                            {
+                                var newB = b.MakeMove(move);
+                                if (newB.IsStatePlayable())
+                                {
+                                    newB.Generation++;
+                                    newB.CalculateWeight();
+                                    solutionQueue.Enqueue(newB);
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            int maxGen = 0;
-            while (!solutionFound && solutionQueue.Count > 0)
-            {
-                string solutions = $"Queue len: {solutionQueue.Count}";
-                var b = solutionQueue.Dequeue();
-                Process(b);
+                    int maxGen = 0;
+                    while (!solutionFound && solutionQueue.Count > 0)
+                    {
+                        string solutions = $"Queue len: {solutionQueue.Count}";
+                        var b = solutionQueue.Dequeue();
+                        Process(b);
 #if !ONLINE_JUDGE
                 if (maxGen < b.Generation)
                 {
@@ -893,31 +841,32 @@ namespace Timus
                     Console.WriteLine($"Gen: {b.Generation}, Positions: {positions.Count}, {solutions}");
                 }
 #endif
-            }
+                    }
 
 #if !ONLINE_JUDGE
             var solutionRestoreTimer = new Stopwatch();
             solutionRestoreTimer.Start();
 #endif
 
-            var solution = new Stack<Move>();
-            while (!winBoard.Equals(board))
-            {
-                solution.Push(winBoard.LastMove);
-                winBoard = positions.First(p => p.Id == winBoard.ParentId);
-            }
+                    var solution = new Stack<Move>();
+                    while (!winBoard.Equals(board))
+                    {
+                        solution.Push(winBoard.LastMove);
+                        winBoard = positions.First(p => p.Id == winBoard.ParentId);
+                    }
 
-            var moveChainBuilder = new StringBuilder();
-            while (solution.Count > 0)
-            {
-                var move = solution.Pop();
-                moveChainBuilder.Append(GetPath(winBoard, move));
-                moveChainBuilder.Append(move.Direction);
-                winBoard = winBoard.MakeMove(move, true);
-            }
+                    var moveChainBuilder = new StringBuilder();
+                    while (solution.Count > 0)
+                    {
+                        var move = solution.Pop();
+                        moveChainBuilder.Append(GetPath(winBoard, move));
+                        moveChainBuilder.Append(move.Direction);
+                        winBoard = winBoard.MakeMove(move, true);
+                    }
 
-            var moveChain = moveChainBuilder.ToString();
-
+                    moveChain = moveChainBuilder.ToString().ToUpper();
+                    Console.Error.WriteLine(moveChain);
+                }
 #if !ONLINE_JUDGE
             solutionRestoreTimer.Stop();
             solveTimer.Stop();
@@ -926,7 +875,13 @@ namespace Timus
                               $"Solution restore time: {solutionRestoreTimer.ElapsedMilliseconds}");
             Console.WriteLine();
 #endif
-            Console.WriteLine(moveChain);
+                //Console.WriteLine(moveChain);
+                // Write an action using Console.WriteLine()
+                // To debug: Console.Error.WriteLine("Debug messages...");
+
+                Console.WriteLine(moveChain[moveCount]);
+                moveCount++;
+            }
 #endif
 #if !ONLINE_JUDGE
             int step = 0;
@@ -973,36 +928,6 @@ namespace Timus
                 Console.SetCursorPosition(0, Console.CursorTop - BoardState.Height);
             } while ((key = Console.ReadKey().Key) != ConsoleKey.Escape);
 #endif
-        }
-
-        private static void PrintBoard(BoardState board, int player)
-        {
-            for (int i = 0; i < BoardState.Len; i++)
-            {
-                if (i / BoardState.Width > 0 && i % BoardState.Width == 0)
-                {
-                    Console.Write(Environment.NewLine);
-                }
-
-                switch (board[i] & ~Cell.Target)
-                {
-                    case Cell.Wall:
-                        Console.Write('#');
-                        break;
-                    case Cell.Accessible:
-                    case Cell.Space:
-                        bool playerHere = player == i;
-                        Console.Write((board[i] & Cell.Target) != 0
-                            ? playerHere ? '+' : '.'
-                            : playerHere ? '@' : ' ');
-                        break;
-                    case Cell.Box:
-                        Console.Write((board[i] & Cell.Target) != 0 ? '*' : '$');
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-            }
         }
 
         private static string GetPath(BoardState board, Move move)
